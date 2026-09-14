@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { PageHeader } from '@/components/page-header'
 import { CashflowSankey } from '@/components/reports/CashflowSankey'
+import { BudgetByGroup } from '@/components/reports/BudgetByGroup'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
@@ -129,6 +130,7 @@ const REPORT_TABS: ReportTab[] = [
   { key: 'income_expenses', labelKey: 'reports.incomeExpenses', enabled: true },
   { key: 'cash_flow', labelKey: 'reports.cashFlow', enabled: true },
   { key: 'money_map', labelKey: 'reports.moneyMap', enabled: true },
+  { key: 'budget', labelKey: 'reports.budget', enabled: true },
 ]
 
 export default function ReportsPage() {
@@ -162,6 +164,10 @@ export default function ReportsPage() {
   // The Money Map (Sankey) tab is driven by the same income/expenses
   // composition, aggregated over the selected historical range.
   const isMoneyMap = activeTab === 'money_map'
+  // The Budget tab is a single-month snapshot (spend vs. budget), not a
+  // historical trend — it owns its own month state and query, and skips the
+  // shared range/interval machinery entirely (see below).
+  const isBudget = activeTab === 'budget'
   const rangeOptions = isCashFlow
     ? FORWARD_RANGE_OPTIONS
     : isMoneyMap
@@ -181,11 +187,11 @@ export default function ReportsPage() {
     // Clamp months/interval to options supported by the new tab
     const nextRanges = key === 'cash_flow'
       ? FORWARD_RANGE_OPTIONS
-      : key === 'money_map'
+      : key === 'money_map' || key === 'budget'
         ? MONEY_MAP_RANGE_OPTIONS
         : HISTORICAL_RANGE_OPTIONS
     if (!nextRanges.some((r) => r.key === rangeKey)) {
-      setRangeKey(key === 'cash_flow' ? '6m' : key === 'money_map' ? '3m' : '1y')
+      setRangeKey(key === 'cash_flow' ? '6m' : key === 'money_map' || key === 'budget' ? '3m' : '1y')
     }
     const nextIntervals = key === 'cash_flow' ? CASH_FLOW_INTERVAL_OPTIONS : HISTORICAL_INTERVAL_OPTIONS
     if (!nextIntervals.some((i) => i.value === interval)) {
@@ -201,7 +207,7 @@ export default function ReportsPage() {
         : activeTab === 'income_expenses' || isMoneyMap
           ? reports.incomeExpenses(months, interval, acctIds, period, days)
           : reports.netWorth(months, interval, acctIds, walletIds, period),
-    enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth'),
+    enabled: currentTab.enabled && !isBudget && !(noAccounts && activeTab !== 'net_worth'),
   })
 
   const summary = data?.summary
@@ -496,7 +502,7 @@ export default function ReportsPage() {
                 </span>
               </div>
             )}
-            <div className="flex items-center rounded-lg border border-border bg-card overflow-hidden">
+            <div className={`flex items-center rounded-lg border border-border bg-card overflow-hidden ${isBudget ? 'hidden' : ''}`}>
               {rangeOptions.map((opt) => (
                 <button
                   key={opt.key}
@@ -511,7 +517,7 @@ export default function ReportsPage() {
                 </button>
               ))}
             </div>
-            <div className={`flex items-center rounded-lg border border-border bg-card overflow-hidden ${isMoneyMap ? 'hidden' : ''}`}>
+            <div className={`flex items-center rounded-lg border border-border bg-card overflow-hidden ${(isMoneyMap || isBudget) ? 'hidden' : ''}`}>
               {intervalOptions.map((opt) => (
                 <button
                   key={opt.key}
@@ -559,6 +565,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Hero Card */}
+      {!isBudget && (
       <div className="bg-card rounded-xl border border-border shadow-sm mb-5">
         <div className="px-5 py-4">
           {isLoading ? (
@@ -613,6 +620,7 @@ export default function ReportsPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Flow (Sankey) */}
       {isMoneyMap && (
@@ -650,7 +658,12 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {!isMoneyMap && (
+      {/* Budget vs. Actual */}
+      {isBudget && (
+        <BudgetByGroup currency={userCurrency} locale={locale} />
+      )}
+
+      {!isMoneyMap && !isBudget && (
       <>
       {/* Main Trend Chart */}
       <div className="bg-card rounded-xl border border-border shadow-sm mb-5">

@@ -1343,7 +1343,11 @@
     "amount": "Amount",
     "investments": "Investments",
     "moneyMap": "Money Map",
-    "range30d": "30D"
+    "range30d": "30D",
+    "budget": "Budget",
+    "noBudgetSet": "No budget set",
+    "remaining": "{{amount}} left",
+    "overBudget": "{{amount}} over"
   },
   "payees": {
     "addFavorite": "Add to favorites",

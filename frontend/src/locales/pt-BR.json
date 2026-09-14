@@ -1344,7 +1344,11 @@
     "amount": "Valor",
     "investments": "Investimentos",
     "moneyMap": "Mapa do Dinheiro",
-    "range30d": "30D"
+    "range30d": "30D",
+    "budget": "Orçamento",
+    "noBudgetSet": "Sem orçamento definido",
+    "remaining": "restam {{amount}}",
+    "overBudget": "{{amount}} acima"
   },
   "payees": {
     "addFavorite": "Adicionar aos favoritos",
