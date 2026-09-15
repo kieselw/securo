@@ -275,6 +275,7 @@ async def owner_split_offset_by_category(
     use_effective_date: bool = False,
     primary_currency: Optional[str] = None,
     workspace_id: Optional[uuid.UUID] = None,
+    status: str = "posted",
 ) -> dict:
     """Per-category, sum of non-owner shares on owner-side debit splits —
     subtract from full owner debits to get the owner's category share."""
@@ -316,7 +317,7 @@ async def owner_split_offset_by_category(
             date_col >= month_start,
             date_col < month_end,
             date_col <= date.today(),
-            Transaction.status == "posted",
+            Transaction.status == status,
             counts_as_user_pnl(),
         )
         .group_by(Transaction.category_id, Transaction.currency)
@@ -442,6 +443,7 @@ async def viewer_shared_spending_by_category(
     month_end: date,
     use_effective_date: bool = False,
     primary_currency: Optional[str] = None,
+    status: str = "posted",
 ) -> dict:
     """Return {category_id (uuid|None): total_share_expense_float} for
     transactions where the viewer participates via a group split.
@@ -479,7 +481,7 @@ async def viewer_shared_spending_by_category(
             date_col >= month_start,
             date_col < month_end,
             date_col <= date.today(),
-            Transaction.status == "posted",
+            Transaction.status == status,
             counts_as_pnl(),
         )
         .group_by(Transaction.category_id, Transaction.currency)
