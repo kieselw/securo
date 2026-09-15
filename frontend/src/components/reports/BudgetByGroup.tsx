@@ -10,9 +10,10 @@ import {
 } from '@/lib/api'
 import { formatCurrency } from '@/lib/format'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
-import { currentMonth, shiftMonth, monthLabel, monthLastDay, monthRange } from '@/lib/month-utils'
+import { currentMonth, monthLabel, monthRange, monthLastDay } from '@/lib/month-utils'
 import { getAccountName } from '@/lib/account-utils'
 import { CategoryIcon } from '@/components/category-icon'
+import { MonthStepper } from '@/components/month-stepper'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TransactionDrillDown, type DrillDownFilter } from '@/components/transaction-drill-down'
 import { TransactionDialog, type TransactionSavePayload } from '@/components/transaction-dialog'
@@ -30,7 +31,13 @@ interface GroupRollup {
   groupName: string
   budgetSum: number
   hasBudget: boolean
+  // Total spend across every category in the group, budgeted or not — the
+  // headline "how much has this group spent" figure.
   actualSum: number
+  // Spend from budgeted categories only — what `remaining`/`pctUsed` are
+  // computed against, so an unbudgeted category's spend can't invent or
+  // inflate an "over budget" state the budgeted categories don't have.
+  budgetedActualSum: number
   pctUsed: number | null
   categories: RowPace[]
 }
@@ -94,46 +101,6 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
 
   const { from: monthFrom, to: monthTo } = monthRange(month)
 
-  // The comparison endpoint's `actual_amount` only counts posted/settled
-  // transactions — a pending card charge (already real money, just not
-  // reconciled by the bank yet) sits in `projected_amount` instead, showing
-  // as R$0 spent here even with a genuine purchase on the card. For this
-  // budget view specifically we want pending treated as already spent, so
-  // fetch it separately and fold it into `actual` below — without touching
-  // the shared endpoint Dashboard/Budgets also rely on.
-  const { data: pendingTxns } = useQuery({
-    queryKey: ['transactions', 'pending', month],
-    queryFn: async () => {
-      const all: Transaction[] = []
-      let page = 1
-      for (;;) {
-        const resp = await transactions.list({
-          from: monthFrom,
-          to: monthTo,
-          type: 'debit',
-          status: 'pending',
-          exclude_transfers: true,
-          user_pnl_only: true,
-          page,
-          limit: 500,
-        })
-        all.push(...resp.items)
-        if (page * 500 >= resp.total) break
-        page += 1
-      }
-      return all
-    },
-  })
-
-  const pendingByCategory = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const tx of pendingTxns ?? []) {
-      if (!tx.category_id) continue
-      m.set(tx.category_id, (m.get(tx.category_id) ?? 0) + num(tx.amount))
-    }
-    return m
-  }, [pendingTxns])
-
   const { data: categoriesList } = useQuery({ queryKey: ['categories'], queryFn: categoriesApi.list })
   const { data: categoryGroupsList } = useQuery({ queryKey: ['categoryGroups'], queryFn: categoryGroupsApi.list })
   const { data: accountsList } = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() })
@@ -176,13 +143,15 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
   }, [month])
 
   // Single source of truth for every number on this page: budget minus
-  // what's already spent (posted transactions + pending ones folded in, see
-  // the pending fetch above) minus what's already known to be coming
-  // (recurring transactions the server projected but hasn't posted yet),
-  // divided by the weeks left to close the month. Both the group/category
-  // list and the "Livre essa semana" headline read off this same array, so
-  // "how much over budget is this category" never has two different answers
-  // depending on which section you're looking at.
+  // what's already spent (posted transactions + pending ones folded in, via
+  // the server's `pending_amount` — same currency-conversion and split-share
+  // adjustments as `actual_amount`, capped at today so a future-dated pending
+  // row never counts as already spent) minus what's already known to be
+  // coming (recurring transactions the server projected but hasn't posted
+  // yet), divided by the weeks left to close the month. Both the
+  // group/category list and the "Livre essa semana" headline read off this
+  // same array, so "how much over budget is this category" never has two
+  // different answers depending on which section you're looking at.
   const rows = useMemo<RowPace[]>(() => {
     if (!data) return []
     const { weeksRemaining } = monthMeta
@@ -191,7 +160,7 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
       const hasBudget = r.budget_amount != null
       const budgetNum = num(r.budget_amount)
       const postedActual = num(r.actual_amount)
-      const pending = pendingByCategory.get(r.category_id) ?? 0
+      const pending = num(r.pending_amount)
       const actualNum = postedActual + pending
       const projectedNum = num(r.projected_amount)
       // What's projected already includes pending (server-side), so folding
@@ -202,19 +171,25 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
       const flexible = hasBudget ? budgetNum - projectedNum : null
       const safeThisWeek = hasBudget ? Math.max(0, flexible!) / weeksRemaining : null
       const pct = hasBudget && budgetNum > 0 ? (projectedNum / budgetNum) * 100 : null
+      const alreadyOver = hasBudget && actualNum > budgetNum
+      const overActual = alreadyOver ? actualNum - budgetNum : 0
+      // A category budgeted at exactly 0 has no percentage to compute (`pct`
+      // stays null above), but it can still be over budget the moment it has
+      // any spend — don't let it default to 'ok' forever just because there's
+      // no ratio to threshold against.
       let status: RowPace['status'] = 'ok'
       if (pct !== null) {
         if (pct > 100) status = 'bad'
         else if (pct >= 80) status = 'warn'
+      } else if (hasBudget && budgetNum === 0 && (actualNum > 0 || projectedNum > 0)) {
+        status = 'bad'
       }
-      const alreadyOver = hasBudget && actualNum > budgetNum
-      const overActual = alreadyOver ? actualNum - budgetNum : 0
       return {
         ...r, hasBudget, budgetNum, actualNum, projectedNum, upcoming, flexible,
         safeThisWeek, pct, status, alreadyOver, overActual,
       }
     })
-  }, [data, monthMeta, pendingByCategory])
+  }, [data, monthMeta])
 
   const groups = useMemo<GroupRollup[]>(() => {
     if (rows.length === 0) return []
@@ -230,8 +205,14 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
       const budgeted = groupRows.filter((r) => r.hasBudget)
       const budgetSum = budgeted.reduce((s, r) => s + r.budgetNum, 0)
       const actualSum = groupRows.reduce((s, r) => s + r.actualNum, 0)
+      // Only budgeted categories count toward the spent-vs-budget picture —
+      // an unbudgeted category's spend was never meant to be tracked against
+      // this budget, and folding it into `remaining`/`pctUsed` would invent
+      // (or inflate) an "over budget" state the budgeted categories don't
+      // actually have.
+      const budgetedActualSum = budgeted.reduce((s, r) => s + r.actualNum, 0)
       const hasBudget = budgeted.length > 0
-      const pctUsed = hasBudget && budgetSum > 0 ? (actualSum / budgetSum) * 100 : null
+      const pctUsed = hasBudget && budgetSum > 0 ? (budgetedActualSum / budgetSum) * 100 : null
       const sortedRows = [...groupRows].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1))
       return {
         groupId,
@@ -239,6 +220,7 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
         budgetSum,
         hasBudget,
         actualSum,
+        budgetedActualSum,
         pctUsed,
         categories: sortedRows,
       }
@@ -284,18 +266,14 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
   return (
     <div>
       {/* Month stepper */}
-      <div className="flex items-center gap-1 mb-5">
-        <button
-          className="h-8 w-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:border-border hover:text-foreground transition-all text-base"
-          onClick={() => setMonth(shiftMonth(month, -1))}
-        >&#8249;</button>
-        <span className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium text-foreground min-w-[160px]">
-          {monthLabel(month, locale).replace(/^\w/, (c) => c.toUpperCase())}
-        </span>
-        <button
-          className="h-8 w-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:border-border hover:text-foreground transition-all text-base"
-          onClick={() => setMonth(shiftMonth(month, 1))}
-        >&#8250;</button>
+      <div className="mb-5">
+        <MonthStepper
+          value={month}
+          onChange={setMonth}
+          locale={locale}
+          prevLabel={t('transactions.monthPrevious')}
+          nextLabel={t('transactions.monthNext')}
+        />
       </div>
 
       {/* Livre essa semana */}
@@ -381,7 +359,7 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
       ) : (
         <div className="space-y-4">
           {groups.map((group) => {
-            const remaining = group.budgetSum - group.actualSum
+            const remaining = group.budgetSum - group.budgetedActualSum
             return (
               <div key={group.groupId} className="bg-card rounded-xl border border-border shadow-sm">
                 <div className="px-5 py-4 border-b border-border">
@@ -417,12 +395,11 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
 
                 <div className="p-2">
                   {group.categories.map((cat) => {
-                    const catRemaining = cat.hasBudget ? cat.budgetNum - cat.actualNum : null
-                    // Bar and "remaining" read off actual spend (posted +
-                    // pending, see `rows` above), not the projected-amount-
-                    // based `cat.pct` used for the attention list's status —
-                    // mixing the two made a row with little posted yet show a
-                    // full red bar next to a large "remaining", contradictory.
+                    // Bar reads off actual spend (posted + pending, see `rows`
+                    // above), not the projected-amount-based `cat.pct` used
+                    // for the attention list's status — mixing the two made a
+                    // row with little posted yet show a full red bar next to
+                    // a large "remaining", contradictory.
                     const catPct = cat.hasBudget && cat.budgetNum > 0 ? (cat.actualNum / cat.budgetNum) * 100 : null
                     return (
                       <button
@@ -449,9 +426,13 @@ export function BudgetByGroup({ currency, locale }: BudgetByGroupProps) {
                                   />
                                 </div>
                                 <span className={`text-[11px] tabular-nums font-medium shrink-0 ${textColorFor(catPct)}`}>
-                                  {catRemaining! >= 0
-                                    ? t('reports.remaining', { amount: mask(formatCurrency(catRemaining!, currency, locale)) })
-                                    : t('reports.overBudget', { amount: mask(formatCurrency(-catRemaining!, currency, locale)) })}
+                                  {cat.alreadyOver
+                                    // Same basis as the attention list above —
+                                    // reuse `overActual` instead of
+                                    // recomputing it here, so the two never
+                                    // drift into showing different numbers.
+                                    ? t('reports.overBudget', { amount: mask(formatCurrency(cat.overActual, currency, locale)) })
+                                    : t('reports.remaining', { amount: mask(formatCurrency(cat.budgetNum - cat.actualNum, currency, locale)) })}
                                 </span>
                               </div>
                             ) : (

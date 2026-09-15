@@ -320,6 +320,60 @@ async def get_budget_vs_actual(
         cat_id = str(cat_uuid)
         spending_map[cat_id] = spending_map.get(cat_id, Decimal("0")) + Decimal(str(total))
 
+    # Pending spending by category — real money already committed (a card
+    # charge that hasn't settled yet) but not yet "posted". Mirrors the
+    # actual-spending computation above (same FX conversion, same split/
+    # shared-expense adjustments, same not-future-dated cap) so the two
+    # stay consistent instead of diverging.
+    pending_result = await session.execute(
+        select(
+            Transaction.category_id,
+            func.sum(_primary_amount_expr()),
+        )
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Transaction.type == "debit",
+            report_date >= month_start,
+            report_date < month_end,
+            Transaction.category_id.isnot(None),
+            report_date <= date.today(),
+            Transaction.status == "pending",
+            counts_as_user_pnl(),
+        )
+        .group_by(Transaction.category_id)
+    )
+    pending_map: dict[str, Decimal] = {}
+    for row in pending_result.all():
+        pending_map[str(row[0])] = abs(row[1] or Decimal("0"))
+
+    pending_own_offset = await owner_split_offset_by_category(
+        session, user_id, month_start, month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+        workspace_id=workspace_id,
+        status="pending",
+    )
+    for cat_uuid, total in pending_own_offset.items():
+        if cat_uuid is None:
+            continue
+        cat_id = str(cat_uuid)
+        if cat_id in pending_map:
+            pending_map[cat_id] -= Decimal(str(total))
+            if pending_map[cat_id] <= 0:
+                pending_map.pop(cat_id)
+
+    pending_shared_by_cat = await viewer_shared_spending_by_category(
+        session, user_id, month_start, month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+        status="pending",
+    )
+    for cat_uuid, total in pending_shared_by_cat.items():
+        if cat_uuid is None:
+            continue
+        cat_id = str(cat_uuid)
+        pending_map[cat_id] = pending_map.get(cat_id, Decimal("0")) + Decimal(str(total))
+
     projected_spending_map = dict(spending_map)
 
     # Add projected recurring transactions for this month (converted to primary currency)
@@ -435,6 +489,7 @@ async def get_budget_vs_actual(
     for category, group in all_categories:
         cat_id = str(category.id)
         actual = spending_map.get(cat_id, Decimal("0"))
+        pending = pending_map.get(cat_id, Decimal("0"))
         projected = projected_spending_map.get(cat_id, Decimal("0"))
         prev_actual = prev_spending_map.get(cat_id, Decimal("0"))
         projected_prev = projected_prev_spending_map.get(cat_id, Decimal("0"))
@@ -459,6 +514,7 @@ async def get_budget_vs_actual(
             group_name=group.name if group else None,
             budget_amount=budget_amount,
             actual_amount=actual,
+            pending_amount=pending,
             projected_amount=projected,
             prev_month_amount=prev_actual,
             projected_prev_month_amount=projected_prev,

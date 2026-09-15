@@ -721,6 +721,7 @@ export interface BudgetVsActual {
   group_name: string | null
   budget_amount: number | null
   actual_amount: number
+  pending_amount: number
   projected_amount: number
   prev_month_amount: number
   projected_prev_month_amount: number
