@@ -1347,7 +1347,21 @@
     "budget": "Budget",
     "noBudgetSet": "No budget set",
     "remaining": "{{amount}} left",
-    "overBudget": "{{amount}} over"
+    "remainingLabel": "Remaining",
+    "overBudget": "{{amount}} over",
+    "weeklyAvailable": "Available in your budget this week",
+    "daysUntilClose": "{{days}} days until {{month}} closes",
+    "categoriesOverBudgetOne": "{{count}} category over budget",
+    "categoriesOverBudgetMany": "{{count}} categories over budget",
+    "attentionInCategories": "Attention on {{count}}",
+    "onTrack": "On track",
+    "attentionHeading": "Needs attention this week",
+    "nothingOffPace": "Nothing off pace this week.",
+    "upcomingRecurring": "recurring still to post: {{amount}}",
+    "alreadyOverBudget": "already past budget",
+    "closeToLimit": "close to the limit",
+    "perWeek": "{{amount}}/wk",
+    "forecastOver": "forecast: {{amount}} over"
   },
   "payees": {
     "addFavorite": "Add to favorites",

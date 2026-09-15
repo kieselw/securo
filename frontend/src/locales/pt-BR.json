@@ -1348,7 +1348,21 @@
     "budget": "Orçamento",
     "noBudgetSet": "Sem orçamento definido",
     "remaining": "restam {{amount}}",
-    "overBudget": "{{amount}} acima"
+    "remainingLabel": "Restante",
+    "overBudget": "{{amount}} acima",
+    "weeklyAvailable": "Disponível no orçamento essa semana",
+    "daysUntilClose": "{{days}} dias até fechar {{month}}",
+    "categoriesOverBudgetOne": "{{count}} categoria estourada",
+    "categoriesOverBudgetMany": "{{count}} categorias estouradas",
+    "attentionInCategories": "Atenção em {{count}}",
+    "onTrack": "No ritmo",
+    "attentionHeading": "Pede atenção essa semana",
+    "nothingOffPace": "Nada fora do ritmo essa semana.",
+    "upcomingRecurring": "recorrência a lançar: {{amount}}",
+    "alreadyOverBudget": "já passou do orçado",
+    "closeToLimit": "perto do limite",
+    "perWeek": "{{amount}}/sem",
+    "forecastOver": "previsão estoura em {{amount}}"
   },
   "payees": {
     "addFavorite": "Adicionar aos favoritos",
